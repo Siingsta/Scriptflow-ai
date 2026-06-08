@@ -5,17 +5,12 @@
 
 import express from 'express';
 import path from 'path';
-import { fileURLToPath } from 'url';
-import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
 
 // Load environment variables
-dotenv.config();
+dotenv.config({ override: true });
 dotenv.config({ path: '.env.local', override: true });
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = 3000;
@@ -26,8 +21,26 @@ app.use(express.json());
 // Lazy-initialization helper for Gemini client
 let geminiClient: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
+  let apiKey = process.env.GEMINI_API_KEY;
+  if (apiKey && typeof apiKey === 'string') {
+    apiKey = apiKey.trim();
+    if (apiKey.startsWith('"') && apiKey.endsWith('"')) {
+      apiKey = apiKey.slice(1, -1);
+    } else if (apiKey.startsWith("'") && apiKey.endsWith("'")) {
+      apiKey = apiKey.slice(1, -1);
+    }
+  }
+
+  if (
+    !apiKey || 
+    typeof apiKey !== 'string' ||
+    apiKey === 'MY_GEMINI_API_KEY' || 
+    apiKey === 'YOUR_GEMINI_API_KEY' || 
+    apiKey === 'YOUR_API_KEY' ||
+    apiKey.trim() === '' || 
+    apiKey.startsWith('YOUR_') || 
+    apiKey.startsWith('MY_')
+  ) {
     throw new Error('GEMINI_API_KEY is not configured. Please add your key in the AI Studio Secrets panel.');
   }
   
@@ -175,48 +188,86 @@ app.post('/api/generate', async (req, res) => {
 Selected video tone: "${selectedTone}".
 Make sure to break it down into sequential scenes. Design a perfect looping connection for the voiceovers. Define the exact hook reasoning. Ensure the total duration is between 20 to 50 seconds.`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
-      contents: userPrompt,
-      config: {
-        systemInstruction: VIRAL_SYSTEM_PROMPT,
-        temperature: 0.9,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING, description: "Highly engaging, clickable title for the short-form video idea." },
-            topic: { type: Type.STRING },
-            tone: { type: Type.STRING },
-            hookStrength: { type: Type.INTEGER, description: "Metric rating from 1 to 10 of how strong the hook is." },
-            totalDuration: { type: Type.INTEGER, description: "Total duration in seconds." },
-            estimatedEngagementRate: { type: Type.STRING, description: "Estimated retention score, e.g. '92%'" },
-            targetPlatform: { type: Type.STRING },
-            loopStrategy: { type: Type.STRING, description: "Pacing advice for connecting the end perfectly back to the beginning." },
-            viralHookReason: { type: Type.STRING, description: "Why this psychological hook works so well." },
-            scenes: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  sceneNumber: { type: Type.INTEGER },
-                  duration: { type: Type.STRING, description: "e.g. '0-3s', '3-8s'" },
-                  visualPrompt: { type: Type.STRING, description: "Action, graphic, zoom, or camera prompt for B-roll or acting cuts." },
-                  voiceover: { type: Type.STRING, description: "The spoken narration text. Keep it snappy, raw, and high energy." },
-                  screenText: { type: Type.STRING, description: "Short on-screen text overlays (1-4 words) for text captions." },
-                  pacingTip: { type: Type.STRING, description: "Vocal speed, inflection, or pausing tips." }
-                },
-                required: ["sceneNumber", "duration", "visualPrompt", "voiceover", "screenText"]
-              }
+    const modelsToTry = ['gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-flash-latest'];
+    let lastError: any = null;
+    let response: any = null;
+
+    for (const modelName of modelsToTry) {
+      try {
+        console.log(`Attempting video script generation using model: ${modelName}`);
+        response = await ai.models.generateContent({
+          model: modelName,
+          contents: userPrompt,
+          config: {
+            systemInstruction: VIRAL_SYSTEM_PROMPT,
+            temperature: 0.9,
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                title: { type: Type.STRING, description: "Highly engaging, clickable title for the short-form video idea." },
+                topic: { type: Type.STRING },
+                tone: { type: Type.STRING },
+                hookStrength: { type: Type.INTEGER, description: "Metric rating from 1 to 10 of how strong the hook is." },
+                totalDuration: { type: Type.INTEGER, description: "Total duration in seconds." },
+                estimatedEngagementRate: { type: Type.STRING, description: "Estimated retention score, e.g. '92%'" },
+                targetPlatform: { type: Type.STRING },
+                loopStrategy: { type: Type.STRING, description: "Pacing advice for connecting the end perfectly back to the beginning." },
+                viralHookReason: { type: Type.STRING, description: "Why this psychological hook works so well." },
+                scenes: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      sceneNumber: { type: Type.INTEGER },
+                      duration: { type: Type.STRING, description: "e.g. '0-3s', '3-8s'" },
+                      visualPrompt: { type: Type.STRING, description: "Action, graphic, zoom, or camera prompt for B-roll or acting cuts." },
+                      voiceover: { type: Type.STRING, description: "The spoken narration text. Keep it snappy, raw, and high energy." },
+                      screenText: { type: Type.STRING, description: "Short on-screen text overlays (1-4 words) for text captions." },
+                      pacingTip: { type: Type.STRING, description: "Vocal speed, inflection, or pausing tips." }
+                    },
+                    required: ["sceneNumber", "duration", "visualPrompt", "voiceover", "screenText"]
+                  }
+                }
+              },
+              required: [
+                "title", "topic", "tone", "hookStrength", "totalDuration", "estimatedEngagementRate",
+                "targetPlatform", "loopStrategy", "viralHookReason", "scenes"
+              ]
             }
-          },
-          required: [
-            "title", "topic", "tone", "hookStrength", "totalDuration", "estimatedEngagementRate",
-            "targetPlatform", "loopStrategy", "viralHookReason", "scenes"
-          ]
+          }
+        });
+        
+        // If successful, break out of the loop
+        if (response) {
+          console.log(`Successfully generated video script using model: ${modelName}`);
+          break;
+        }
+      } catch (err: any) {
+        lastError = err;
+        const errMsg = err?.message || '';
+        const errStatus = err?.status || '';
+        const isUnavailable = 
+          errMsg.includes('503') || 
+          errMsg.includes('UNAVAILABLE') || 
+          errMsg.includes('high demand') ||
+          errStatus === 'UNAVAILABLE' ||
+          errStatus === 503 ||
+          errStatus === '503';
+          
+        if (isUnavailable) {
+          console.warn(`Model ${modelName} is currently unavailable or experiencing high demand. Trying next fallback...`);
+          continue;
+        } else {
+          // If it's some other non-503/UNAVAILABLE error (e.g., auth, bad schema), throw it immediately
+          throw err;
         }
       }
-    });
+    }
+
+    if (!response && lastError) {
+      throw lastError;
+    }
 
     const parsedData = JSON.parse(response.text || '{}');
     return res.json(parsedData);
@@ -224,24 +275,36 @@ Make sure to break it down into sequential scenes. Design a perfect looping conn
   } catch (error: any) {
     console.error('Gemini Generation Error:', error.message);
     
-    // Check if the error is due to a missing AI Key
-    const isKeyError = error.message.includes('GEMINI_API_KEY') || error.message.includes('API key');
+    // Check if the error is due to a missing/invalid key or unauthenticated response
+    const errorMessageStr = error?.message || '';
+    const errorStatusStr = error?.status || '';
+    const isKeyError = 
+      errorMessageStr.includes('GEMINI_API_KEY') || 
+      errorMessageStr.includes('API key') || 
+      errorMessageStr.includes('API_KEY') ||
+      errorMessageStr.includes('UNAUTHENTICATED') || 
+      errorMessageStr.includes('unauthenticated') || 
+      errorMessageStr.includes('authentication credentials') ||
+      errorMessageStr.includes('401') ||
+      errorStatusStr === 'UNAUTHENTICATED' ||
+      errorStatusStr === '401' ||
+      errorStatusStr === 401;
     
     // In order to provide a pristine preview user experience even before they configure their custom keys,
     // we return a beautiful simulated script payload marked with a status letting them know.
     if (isKeyError) {
-      console.warn('Falling back to custom simulated generation due to missing server API keys.');
+      console.warn('Falling back to custom simulated generation due to missing/invalid server API keys.');
       const demoScript = generateSimulatedScript(topic, selectedTone, selectedPlatform);
       return res.json({
         ...demoScript,
         _simulation: true,
-        message: 'This script is generated in Demo Mode because a GEMINI_API_KEY is not configured yet. Add your key in AI Studio Secrets to unlock real AI generation!'
+        message: 'This script is generated in Demo/Simulation Mode. To unlock live production Google Gemini AI, please add a valid GEMINI_API_KEY in the AI Studio Settings secrets panel.'
       });
     }
 
     return res.status(500).json({ 
-      error: 'Generation failed: ' + error.message,
-      suggestion: 'Ensure your GEMINI_API_KEY is valid and configured.'
+      error: 'Generation failed: ' + errorMessageStr,
+      suggestion: 'Ensure your GEMINI_API_KEY is valid and configured in the AI Studio Secrets panel.'
     });
   }
 });
@@ -283,7 +346,20 @@ app.post('/api/synthesize', async (req, res) => {
   } catch (error: any) {
     console.error('Speech synthesis error:', error.message);
     
-    const isKeyError = error.message.includes('GEMINI_API_KEY') || error.message.includes('API key');
+    const errorMessageStr = error?.message || '';
+    const errorStatusStr = error?.status || '';
+    const isKeyError = 
+      errorMessageStr.includes('GEMINI_API_KEY') || 
+      errorMessageStr.includes('API key') || 
+      errorMessageStr.includes('API_KEY') ||
+      errorMessageStr.includes('UNAUTHENTICATED') || 
+      errorMessageStr.includes('unauthenticated') || 
+      errorMessageStr.includes('authentication credentials') ||
+      errorMessageStr.includes('401') ||
+      errorStatusStr === 'UNAUTHENTICATED' ||
+      errorStatusStr === '401' ||
+      errorStatusStr === 401;
+      
     if (isKeyError) {
       return res.status(400).json({ 
         error: 'Demo Mode Fallback',
@@ -293,7 +369,7 @@ app.post('/api/synthesize', async (req, res) => {
     }
     
     return res.status(500).json({ 
-      error: error.message || 'Speech Synthesis Failed'
+      error: errorMessageStr || 'Speech Synthesis Failed'
     });
   }
 });
@@ -302,7 +378,8 @@ app.post('/api/synthesize', async (req, res) => {
 async function setupServer() {
   if (process.env.NODE_ENV !== "production") {
     // Development mode
-    const vite = await createViteServer({
+    const { createServer } = await import('vite');
+    const vite = await createServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
