@@ -13,7 +13,7 @@ export default function App() {
 
     try {
       // Direct front-end Gemini API call targeting Google AI Studio endpoint
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      const apiKey = ""AQ.Ab8RN6KqHzP2EPfTYS6KA6jc2EORwP7sfaY4b-0XrxCN8mmLfg""
       const url = `https://googleapis.com{apiKey}`;
 
       const response = await fetch(url, {
