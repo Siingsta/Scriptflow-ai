@@ -1,0 +1,6 @@
+{
+  "name": "ScriptFlow AI",
+  "description": "ScriptFlow AI is a high-performance script generation tool for viral YouTube Shorts and Instagram Reels using Gemini AI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
